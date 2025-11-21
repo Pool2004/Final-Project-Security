@@ -1,5 +1,5 @@
 """
-signature_tool.py
+firma.py
 
 Herramienta para firmas digitales con RSA entre dos equipos.
 

@@ -1,5 +1,5 @@
 """
-hash_demo.py
+caso_hashing.py
 
 Demostración de hashes con SHA-256 para comprobar integridad entre dos equipos.
 

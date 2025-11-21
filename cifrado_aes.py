@@ -1,5 +1,5 @@
 """
-aes_tool.py
+cifrado_aes.py
 
 Herramienta simple para cifrado simétrico con AES-GCM entre dos equipos.
 
