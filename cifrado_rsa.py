@@ -1,15 +1,4 @@
-"""Ejercicio práctico de cifrado asimétrico con RSA-OAEP.
-
-Subcomandos:
-    - gen: genera un par de claves RSA (privada/publica) en PEM.
-    - encrypt: cifra un mensaje con la clave pública y devuelve ciphertext en hex.
-    - decrypt: descifra el ciphertext (hex) usando la clave privada.
-
-Ejemplo rápido:
-    python caso_cifrado_rsa.py gen --password
-    python caso_cifrado_rsa.py encrypt "Mensaje a cifrar"
-    python caso_cifrado_rsa.py decrypt <ciphertext_hex>
-"""
+"""Ejercicio práctico de cifrado asimétrico con RSA-OAEP."""
 
 from __future__ import annotations
 
@@ -24,60 +13,68 @@ DEFAULT_PRIV = "rsa_private.pem"
 DEFAULT_PUB = "rsa_public.pem"
 
 
-def generate_keypair(bits: int = 2048) -> tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
-    private = rsa.generate_private_key(public_exponent=65537, key_size=bits)
-    return private, private.public_key()
+class RSAEncryptionTool:
+    """Gestiona claves y operaciones RSA-OAEP."""
 
+    def __init__(self, key_size: int = 2048):
+        self.key_size = key_size
 
-def save_private_key(key: rsa.RSAPrivateKey, path: Path, password: bytes | None) -> None:
-    algorithm = (
-        serialization.BestAvailableEncryption(password) if password else serialization.NoEncryption()
-    )
-    pem = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=algorithm,
-    )
-    path.write_bytes(pem)
+    def generate_keypair(self) -> tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
+        private = rsa.generate_private_key(public_exponent=65537, key_size=self.key_size)
+        return private, private.public_key()
 
+    @staticmethod
+    def save_private_key(key: rsa.RSAPrivateKey, path: Path, password: bytes | None) -> None:
+        algorithm = (
+            serialization.BestAvailableEncryption(password)
+            if password
+            else serialization.NoEncryption()
+        )
+        pem = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=algorithm,
+        )
+        path.write_bytes(pem)
 
-def save_public_key(key: rsa.RSAPublicKey, path: Path) -> None:
-    pem = key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    path.write_bytes(pem)
+    @staticmethod
+    def save_public_key(key: rsa.RSAPublicKey, path: Path) -> None:
+        pem = key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        path.write_bytes(pem)
 
+    @staticmethod
+    def load_private_key(path: Path, password: bytes | None) -> rsa.RSAPrivateKey:
+        return serialization.load_pem_private_key(path.read_bytes(), password=password)
 
-def load_private_key(path: Path, password: bytes | None) -> rsa.RSAPrivateKey:
-    return serialization.load_pem_private_key(path.read_bytes(), password=password)
+    @staticmethod
+    def load_public_key(path: Path) -> rsa.RSAPublicKey:
+        return serialization.load_pem_public_key(path.read_bytes())
 
+    @staticmethod
+    def encrypt(public_key: rsa.RSAPublicKey, message: str) -> bytes:
+        return public_key.encrypt(
+            message.encode("utf-8"),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None,
+            ),
+        )
 
-def load_public_key(path: Path) -> rsa.RSAPublicKey:
-    return serialization.load_pem_public_key(path.read_bytes())
-
-
-def encrypt_message(public_key: rsa.RSAPublicKey, message: str) -> bytes:
-    return public_key.encrypt(
-        message.encode("utf-8"),
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None,
-        ),
-    )
-
-
-def decrypt_message(private_key: rsa.RSAPrivateKey, ciphertext: bytes) -> str:
-    data = private_key.decrypt(
-        ciphertext,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None,
-        ),
-    )
-    return data.decode("utf-8")
+    @staticmethod
+    def decrypt(private_key: rsa.RSAPrivateKey, ciphertext: bytes) -> str:
+        data = private_key.decrypt(
+            ciphertext,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None,
+            ),
+        )
+        return data.decode("utf-8")
 
 
 def _prompt_password(confirm: bool) -> bytes | None:
@@ -92,21 +89,23 @@ def _prompt_password(confirm: bool) -> bytes | None:
 
 
 def cmd_gen(args: argparse.Namespace) -> None:
-    private, public = generate_keypair(bits=args.bits)
+    tool = RSAEncryptionTool(key_size=args.bits)
+    private, public = tool.generate_keypair()
     priv_path = Path(args.private)
     pub_path = Path(args.public)
     password = _prompt_password(confirm=True) if args.password else None
-    save_private_key(private, priv_path, password=password)
-    save_public_key(public, pub_path)
+    tool.save_private_key(private, priv_path, password=password)
+    tool.save_public_key(public, pub_path)
     print(f"Par RSA generado en {priv_path} (privada) y {pub_path} (pública).")
 
 
 def cmd_encrypt(args: argparse.Namespace) -> None:
+    tool = RSAEncryptionTool()
     pub_path = Path(args.public)
     if not pub_path.exists():
         raise SystemExit(f"No existe la clave pública en {pub_path}. Ejecuta 'gen' primero.")
-    public = load_public_key(pub_path)
-    ciphertext = encrypt_message(public, args.message)
+    public = tool.load_public_key(pub_path)
+    ciphertext = tool.encrypt(public, args.message)
     hex_value = ciphertext.hex()
     print("Ciphertext (hex) listo para compartir:")
     print(hex_value)
@@ -116,17 +115,18 @@ def cmd_encrypt(args: argparse.Namespace) -> None:
 
 
 def cmd_decrypt(args: argparse.Namespace) -> None:
+    tool = RSAEncryptionTool()
     priv_path = Path(args.private)
     if not priv_path.exists():
         raise SystemExit(f"No existe la clave privada en {priv_path}.")
     password = _prompt_password(confirm=False) if args.password else None
-    private = load_private_key(priv_path, password=password)
+    private = tool.load_private_key(priv_path, password=password)
     try:
         ciphertext = bytes.fromhex(args.ciphertext.strip())
     except ValueError as exc:
         raise SystemExit("El ciphertext no es hex válido.") from exc
     try:
-        message = decrypt_message(private, ciphertext)
+        message = tool.decrypt(private, ciphertext)
     except Exception as exc:
         raise SystemExit(f"No se pudo descifrar: {exc}") from exc
     print("Mensaje descifrado:")

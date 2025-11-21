@@ -1,54 +1,31 @@
 # SecOps Lab Toolkit
 
-Colección compacta de utilidades de línea de comandos para practicar conceptos de seguridad ofensiva y defensiva: verificación de integridad, cifrado simétrico y firmas digitales. Cada script fue reescrito con `argparse`, mensajes contextualizados y opciones modernas para automatizar laboratorios host ↔ VM.
+Mini laboratorio de criptografía pensado para tareas rápidas: verificar integridad de archivos, cifrar mensajes (simétrico/asimétrico) y firmar contenido. Todo corre desde CLI y cada script está orientado a objetos para facilitar la reutilización en otros proyectos.
 
-## Componentes
-- `caso_hashing.py`: CLI con subcomandos `digest` (genera hashes) y `compare` (valida un archivo contra un hash en texto o archivo).
-- `cifrado_aes.py`: cifrado/descifrado AES-256-GCM con empaquetado opcional en JSON (`encrypt`, `decrypt`).
-- `firma.py`: orquestación de claves RSA-PSS, firmas y verificación (`gen`, `sign`, `verify`) con protección por contraseña opcional.
+## Puesta en marcha express
+1. **Clona o copia** este repositorio.
+2. **Prepara un entorno** (PowerShell):
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   ```
 
-## Requisitos
-- Python 3.9 o superior.
-- Dependencias listadas en `requirements.txt`.
+## Scripts y ejecución
 
-Instalación recomendada:
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+| Script | Qué hace | Ejemplos |
+| --- | --- | --- |
+| `caso_hashing.py` | Calcula/valida hashes SHA-256 con `HashIntegrityTool`. | `python caso_hashing.py digest documento.pdf --out documento.sha256`<br>`python caso_hashing.py compare documento.pdf --hash-file documento.sha256` |
+| `cifrado_aes.py` | `AESGCMTool` cifra/descifra mensajes con AES-GCM, opcionalmente serializando a JSON. | `python cifrado_aes.py encrypt "mensaje secreto"`<br>`python cifrado_aes.py decrypt --json-in paquete.json` |
+| `caso_cifrado_rsa.py` | `RSAEncryptionTool` genera claves RSA-OAEP y permite cifrar/descifrar. | `python caso_cifrado_rsa.py gen --password`<br>`python caso_cifrado_rsa.py encrypt "texto"`<br>`python caso_cifrado_rsa.py decrypt <cipher_hex>` |
+| `firma.py` | `RSASignatureTool` crea claves RSA-PSS, firma y verifica mensajes. | `python firma.py gen --password`<br>`python firma.py sign "release listo"`<br>`python firma.py verify "release listo" <firma_hex>` |
 
-## Flujo de trabajo
+> Tip: cada script incluye `--help` con todas las opciones disponibles.
 
-### Hashes
-```powershell
-python caso_hashing.py digest evidencia.iso --out evidencia.sha256
-python caso_hashing.py compare evidencia.iso --hash-file evidencia.sha256
-python caso_hashing.py compare evidencia.iso --hash-value <hash_hex>
-```
+## Buenas prácticas rápidas
+- No reutilices la misma combinación clave+nonce en AES-GCM.
+- Protege tus `.pem` con `--password` si los vas a mover entre máquinas.
+- Guarda los hashes en carpetas separadas del archivo original para detectar manipulaciones.
 
-### AES-GCM
-```powershell
-python cifrado_aes.py encrypt "Mensaje ultra secreto" --json-out paquete.json
-python cifrado_aes.py decrypt --json-in paquete.json
-# o con parámetros individuales
-python cifrado_aes.py decrypt --key <hex> --nonce <hex> --ciphertext <hex>
-```
-
-### Firmas RSA
-```powershell
-python firma.py gen --password
-python firma.py sign "Release 1.2 listo"
-python firma.py verify "Release 1.2 listo" <firma_hex>
-```
-
-## Buenas prácticas
-- No reutilizar el mismo par `clave + nonce` para AES-GCM.
-- Guardar los archivos `sign_private.pem` en soportes cifrados; habilitar `--password` para agregar PBKDF + AES al PEM.
-- Mantener los hashes en rutas separadas del archivo original para detectar alteraciones.
-
-## Ideas futuras
-- Empaquetar como módulo (`python -m secopslab ...`).
-- Añadir soporte para entrada/salida por tuberías y pruebas unitarias mínimas.
-- Incorporar generación automatizada de reportes HTML con resultados criptográficos.
+## ¿Qué sigue?
+- Crear módulos (`python -m secops_lab ...`), agregar pruebas y automatizar reportes si lo usas en cursos o talleres.
