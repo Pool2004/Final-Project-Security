@@ -1,148 +1,158 @@
-"""
-firma.py
+"""Herramienta sencilla para firmas digitales RSA-PSS."""
 
-Herramienta para firmas digitales con RSA entre dos equipos.
+from __future__ import annotations
 
-Modos:
-- GEN: Generar par de claves de firma -> sign_private.pem, sign_public.pem
-- SIGN: Firmar un mensaje con la clave privada -> firma (hex)
-- VERIFY: Verificar una firma (hex) usando la clave pública y el mensaje
-
-Uso típico:
-- Host: GEN -> envía sign_public.pem a la VM.
-- Host: SIGN -> envía mensaje + firma (hex) + clave pública a la VM.
-- VM: VERIFY -> comprueba si la firma es válida.
-"""
-
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives import hashes, serialization
+import argparse
+import getpass
 from pathlib import Path
 
-SIGN_PRIVATE_FILE = "sign_private.pem"
-SIGN_PUBLIC_FILE = "sign_public.pem"
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
-def generar_par_claves_firma():
-    private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-    )
-    public_key = private_key.public_key()
-    return private_key, public_key
+DEFAULT_PRIV = "sign_private.pem"
+DEFAULT_PUB = "sign_public.pem"
 
-def guardar_clave_privada(private_key, ruta, password=None):
-    if password:
-        encryption_alg = serialization.BestAvailableEncryption(password)
-    else:
-        encryption_alg = serialization.NoEncryption()
+# Glosario breve:
+# - "sello": firma digital en hex.
+# - "llavero": conjunto de archivos PEM (privada/pública).
 
-    pem = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=encryption_alg,
-    )
-    with open(ruta, "wb") as f:
-        f.write(pem)
 
-def guardar_clave_publica(public_key, ruta):
-    pem = public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    with open(ruta, "wb") as f:
-        f.write(pem)
+class SignatureManager:
+    """Orquesta la generación de llaveros y firmas usando RSA-PSS."""
 
-def cargar_clave_privada(ruta, password=None):
-    with open(ruta, "rb") as f:
-        data = f.read()
-    private_key = serialization.load_pem_private_key(data, password=password)
-    return private_key
+    def __init__(self, key_size: int = 2048):
+        self.key_size = key_size
 
-def cargar_clave_publica(ruta):
-    with open(ruta, "rb") as f:
-        data = f.read()
-    public_key = serialization.load_pem_public_key(data)
-    return public_key
+    def _prompt_password(self, confirm: bool) -> bytes | None:
+        password = getpass.getpass("Contraseña para la clave privada (enter para ninguna): ")
+        if not password:
+            return None
+        if confirm:
+            repeat = getpass.getpass("Confirma la contraseña: ")
+            if repeat != password:
+                raise SystemExit("Las contraseñas no coinciden.")
+        return password.encode("utf-8")
 
-def firmar_mensaje(private_key, mensaje):
-    datos = mensaje.encode("utf-8")
-    firma = private_key.sign(
-        datos,
-        padding.PSS(
-            mgf=padding.MGF1(hashes.SHA256()),
-            salt_length=padding.PSS.MAX_LENGTH,
-        ),
-        hashes.SHA256(),
-    )
-    return firma
+    def generar_llavero(self) -> tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
+        privada = rsa.generate_private_key(public_exponent=65537, key_size=self.key_size)
+        return privada, privada.public_key()
 
-def verificar_firma(public_key, mensaje, firma):
-    datos = mensaje.encode("utf-8")
-    try:
-        public_key.verify(
-            firma,
-            datos,
-            padding.PSS(
-                mgf=padding.MGF1(hashes.SHA256()),
-                salt_length=padding.PSS.MAX_LENGTH,
-            ),
+    @staticmethod
+    def guardar_privada(key: rsa.RSAPrivateKey, destino: Path, password: bytes | None) -> None:
+        algoritmo = (
+            serialization.BestAvailableEncryption(password)
+            if password
+            else serialization.NoEncryption()
+        )
+        pem = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=algoritmo,
+        )
+        destino.write_bytes(pem)
+
+    @staticmethod
+    def guardar_publica(key: rsa.RSAPublicKey, destino: Path) -> None:
+        pem = key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        destino.write_bytes(pem)
+
+    @staticmethod
+    def cargar_privada(origen: Path, password: bytes | None) -> rsa.RSAPrivateKey:
+        return serialization.load_pem_private_key(origen.read_bytes(), password=password)
+
+    @staticmethod
+    def cargar_publica(origen: Path) -> rsa.RSAPublicKey:
+        return serialization.load_pem_public_key(origen.read_bytes())
+
+    @staticmethod
+    def firmar_mensaje(key: rsa.RSAPrivateKey, message: str) -> bytes:
+        return key.sign(
+            message.encode("utf-8"),
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
             hashes.SHA256(),
         )
-        return True
-    except Exception:
-        return False
 
-def modo_gen():
-    print("=== MODO GEN (Generar claves de firma) ===")
-    private_key, public_key = generar_par_claves_firma()
-    guardar_clave_privada(private_key, SIGN_PRIVATE_FILE, password=None)
-    guardar_clave_publica(public_key, SIGN_PUBLIC_FILE)
-    print(f"Claves de firma generadas en '{SIGN_PRIVATE_FILE}' y '{SIGN_PUBLIC_FILE}'.")
-    print("Envía 'sign_public.pem' a tu compañero para que pueda verificar firmas.")
+    @staticmethod
+    def verificar_sello(key: rsa.RSAPublicKey, message: str, signature: bytes) -> bool:
+        try:
+            key.verify(
+                signature,
+                message.encode("utf-8"),
+                padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+                hashes.SHA256(),
+            )
+            return True
+        except Exception:
+            return False
 
-def modo_sign():
-    print("=== MODO SIGN (Firmar mensaje) ===")
-    if not Path(SIGN_PRIVATE_FILE).exists():
-        print(f"No se encontró '{SIGN_PRIVATE_FILE}'. Genera primero las claves (modo GEN).")
-        return
-    private_key = cargar_clave_privada(SIGN_PRIVATE_FILE, password=None)
-    mensaje = input("Mensaje a firmar: ")
-    firma = firmar_mensaje(private_key, mensaje)
-    print("\nFirma (hex) - envía esto junto con el mensaje y la clave pública:")
-    print(firma.hex())
+    def cmd_gen(self, args: argparse.Namespace) -> None:
+        priv, pub = self.generar_llavero()
+        priv_path = Path(args.private)
+        pub_path = Path(args.public)
+        password = self._prompt_password(confirm=True) if args.password else None
+        self.guardar_privada(priv, priv_path, password)
+        self.guardar_publica(pub, pub_path)
+        print(f"Llavero creado: {priv_path} / {pub_path}")
 
-def modo_verify():
-    print("=== MODO VERIFY (Verificar firma) ===")
-    if not Path(SIGN_PUBLIC_FILE).exists():
-        print(f"No se encontró '{SIGN_PUBLIC_FILE}'. Asegúrate de tener la clave pública de firma.")
-        return
-    public_key = cargar_clave_publica(SIGN_PUBLIC_FILE)
-    mensaje = input("Introduce el mensaje (tal como se firmó): ")
-    firma_hex = input("Introduce la firma (hex): ").strip()
-    try:
-        firma = bytes.fromhex(firma_hex)
-    except ValueError:
-        print("La firma no es hex válida.")
-        return
+    def cmd_sign(self, args: argparse.Namespace) -> None:
+        ruta = Path(args.private)
+        if not ruta.exists():
+            raise SystemExit(f"No existe la clave privada en {ruta}")
+        password = self._prompt_password(confirm=False) if args.password else None
+        priv = self.cargar_privada(ruta, password=password)
+        sello = self.firmar_mensaje(priv, args.message)
+        print("Sello (hex):")
+        print(sello.hex())
 
-    es_valida = verificar_firma(public_key, mensaje, firma)
-    print("\n¿Firma válida?", es_valida)
+    def cmd_verify(self, args: argparse.Namespace) -> None:
+        ruta = Path(args.public)
+        if not ruta.exists():
+            raise SystemExit(f"No existe la clave pública en {ruta}")
+        pub = self.cargar_publica(ruta)
+        try:
+            sello = bytes.fromhex(args.signature)
+        except ValueError as exc:
+            raise SystemExit("La firma suministrada no es hex válida.") from exc
+        es_valido = self.verificar_sello(pub, args.message, sello)
+        print("✅ Firma válida." if es_valido else "❌ Firma inválida.")
 
-def main():
-    print("=== SIGNATURE TOOL ===")
-    print("Modos:")
-    print("  GEN    - Generar claves de firma")
-    print("  SIGN   - Firmar un mensaje")
-    print("  VERIFY - Verificar una firma")
-    modo = input("Modo (GEN/SIGN/VERIFY): ").strip().upper()
+    def build_parser(self) -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser(description="Firmas RSA-PSS en CLI.")
+        sub = parser.add_subparsers(dest="cmd", required=True)
 
-    if modo == "GEN":
-        modo_gen()
-    elif modo == "SIGN":
-        modo_sign()
-    elif modo == "VERIFY":
-        modo_verify()
-    else:
-        print("Modo no válido.")
+        gen = sub.add_parser("gen", help="Generar llavero nuevo.")
+        gen.add_argument("--private", default=DEFAULT_PRIV, help="Archivo PEM para la clave privada.")
+        gen.add_argument("--public", default=DEFAULT_PUB, help="Archivo PEM para la clave pública.")
+        gen.add_argument("--bits", type=int, default=2048, help="Tamaño de clave.")
+        gen.add_argument("--password", action="store_true", help="Proteger la clave privada con contraseña.")
+        gen.set_defaults(func=self.cmd_gen)
+
+        sign = sub.add_parser("sign", help="Firmar mensaje en texto plano.")
+        sign.add_argument("message", help="Contenido a firmar.")
+        sign.add_argument("--private", default=DEFAULT_PRIV, help="Ruta de la clave privada.")
+        sign.add_argument("--password", action="store_true", help="Solicitar contraseña para abrir el PEM.")
+        sign.set_defaults(func=self.cmd_sign)
+
+        verify = sub.add_parser("verify", help="Verificar un sello digital.")
+        verify.add_argument("message", help="Mensaje original.")
+        verify.add_argument("signature", help="Firma en hex.")
+        verify.add_argument("--public", default=DEFAULT_PUB, help="Ruta de la clave pública.")
+        verify.set_defaults(func=self.cmd_verify)
+
+        return parser
+
+    def run(self, argv: list[str] | None = None) -> None:
+        parser = self.build_parser()
+        args = parser.parse_args(argv)
+        args.func(args)
+
+
+def main() -> None:
+    SignatureManager().run()
+
 
 if __name__ == "__main__":
     main()
