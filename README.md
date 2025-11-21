@@ -1,7 +1,3 @@
-# SecOps Lab Toolkit
-
-Mini laboratorio de criptografía pensado para tareas rápidas: verificar integridad de archivos, cifrar mensajes (simétrico/asimétrico) y firmar contenido. Todo corre desde CLI y cada script está orientado a objetos para facilitar la reutilización en otros proyectos.
-
 ## Puesta en marcha express
 1. **Clona o copia** este repositorio.
 2. **Prepara un entorno** (PowerShell):
